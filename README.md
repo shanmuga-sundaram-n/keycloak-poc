@@ -64,15 +64,19 @@ The **Authorization Code Flow** is the most secure OAuth2 flow for web applicati
 
 How PKCE works:
 
-```
-1. Frontend generates a random "code_verifier" (secret)
-2. Frontend hashes it into a "code_challenge" (SHA-256)
-3. Frontend sends code_challenge to Keycloak (not the verifier)
-4. User authenticates in Keycloak
-5. Keycloak returns an authorization code to the frontend
-6. Frontend sends the code + original code_verifier to Keycloak
-7. Keycloak hashes the verifier, compares to the stored challenge
-8. If they match → Keycloak issues tokens
+```mermaid
+sequenceDiagram
+    participant F as Frontend (SPA)
+    participant K as Keycloak
+
+    F->>F: 1. Generate random code_verifier
+    F->>F: 2. Hash into code_challenge (SHA-256)
+    F->>K: 3. Send code_challenge (not verifier)
+    K->>K: 4. User authenticates
+    K->>F: 5. Return authorization code
+    F->>K: 6. Send code + original code_verifier
+    K->>K: 7. Hash verifier, compare to stored challenge
+    K->>F: 8. Match! Issue tokens
 ```
 
 This prevents authorization code interception attacks — even if an attacker steals the authorization code, they cannot exchange it for tokens without the original `code_verifier`.
@@ -111,15 +115,11 @@ Because JWTs are self-contained and signed, the backend can validate them withou
 
 RBAC restricts system access based on assigned **roles**. Each role represents a set of permissions:
 
-```
-+-------------+--------------------------------+-----------------------------+
-|    Role     |        Backend Access           |      Frontend Pages        |
-+-------------+--------------------------------+-----------------------------+
-|    USER     | /api/user/*                     | Dashboard                  |
-|   ADMIN     | /api/admin/* + /api/support/*   | Dashboard, Admin, Support  |
-|  SUPPORT    | /api/support/*                  | Dashboard, Support         |
-+-------------+--------------------------------+-----------------------------+
-```
+| Role | Backend Access | Frontend Pages |
+|------|---------------|----------------|
+| USER | `/api/user/*` | Dashboard |
+| ADMIN | `/api/admin/*` + `/api/support/*` | Dashboard, Admin, Support |
+| SUPPORT | `/api/support/*` | Dashboard, Support |
 
 Authorization is enforced at **two layers**:
 - **Backend (authoritative)** — Spring Security checks JWT roles before processing requests. This is the real security boundary.
@@ -129,19 +129,29 @@ Authorization is enforced at **two layers**:
 
 **Keycloak** is an open-source Identity and Access Management (IAM) solution. In this architecture, it serves as the **single source of truth** for all identity operations:
 
-```
-+------------------------------------------------------------------+
-|                        KEYCLOAK                                   |
-|                                                                   |
-|  Manages:                                                         |
-|  - User registration & credential storage                        |
-|  - Login authentication & session management                     |
-|  - OAuth2/OIDC token issuance (access, refresh, ID tokens)      |
-|  - Role assignment & management                                  |
-|  - Password reset & email verification flows                    |
-|  - SSO (Single Sign-On) across applications                     |
-|  - Custom login/registration UI themes                          |
-+------------------------------------------------------------------+
+```mermaid
+mindmap
+  root((Keycloak))
+    User Management
+      Registration
+      Credential Storage
+    Authentication
+      Login
+      Session Management
+      SSO
+    Token Issuance
+      Access Tokens
+      Refresh Tokens
+      ID Tokens
+    Authorization
+      Role Assignment
+      Role Management
+    Account Flows
+      Password Reset
+      Email Verification
+    UI Customization
+      Custom Themes
+      Branded Login Pages
 ```
 
 Neither the frontend nor backend store passwords or manage sessions — Keycloak handles all of it.
@@ -152,50 +162,41 @@ Neither the frontend nor backend store passwords or manage sessions — Keycloak
 
 ### High-Level Architecture Diagram
 
-```
-                              KEYCLOAK POC — ARCHITECTURE
- ============================================================================================
+```mermaid
+graph TB
+    subgraph Browser
+        SPA["React SPA<br/><i>Keycloak JS · React Router · Axios</i>"]
+    end
 
-   BROWSER                                                              DOCKER NETWORK
- +------------------+         +---------------------------------------------------+
- |                  |         |                                                   |
- |   React SPA      |  :3000  |  +-----------+         +------------------------+ |
- |   (Frontend)     |<------->|  |  Nginx    |  /api/* |   Spring Boot          | |
- |                  |         |  |  :3000    |-------->|   Backend (:8081)      | |
- |  - Keycloak JS   |         |  |           |         |                        | |
- |  - React Router  |         |  | static    |         |  - OAuth2 Resource     | |
- |  - Axios         |         |  | assets    |         |    Server              | |
- |                  |         |  +-----------+         |  - JWT Validation      | |
- +--------+---------+         |                        |  - RBAC Enforcement    | |
-          |                   |                        +----------+-------------+ |
-          |                   |                                   |               |
-          |   :8080           |  +-------------------+            |               |
-          +------------------>|  |                   |    JWK     |               |
-             Login/Register   |  |    Keycloak       |<-----------+               |
-             OAuth2 + PKCE    |  |    (:8080)        |  (public key fetch)       |
-                              |  |                   |                           |
-                              |  |  - Realm:         |                           |
-                              |  |    poc-realm      |                           |
-                              |  |  - Theme:         |                           |
-                              |  |    poc-theme      |                           |
-                              |  |  - Roles:         |                           |
-                              |  |    USER/ADMIN/    |                           |
-                              |  |    SUPPORT        |                           |
-                              |  +--------+----------+                           |
-                              |           |                                      |
-                              |           | JDBC                                 |
-                              |           |                                      |
-                              |  +--------+----------+                           |
-                              |  |                   |                           |
-                              |  |   PostgreSQL      |                           |
-                              |  |   (:5432)         |                           |
-                              |  |                   |                           |
-                              |  |  - Users          |                           |
-                              |  |  - Sessions       |                           |
-                              |  |  - Realm config   |                           |
-                              |  +-------------------+                           |
-                              |                                                  |
-                              +--------------------------------------------------+
+    subgraph Docker Network
+        subgraph Frontend Container
+            NGINX["Nginx :3000<br/><i>Static Assets · SPA Routing</i>"]
+        end
+
+        subgraph Backend Container
+            SPRING["Spring Boot :8081<br/><i>OAuth2 Resource Server<br/>JWT Validation · RBAC</i>"]
+        end
+
+        subgraph Identity Provider
+            KC["Keycloak :8080<br/><i>Realm: poc-realm<br/>Theme: poc-theme<br/>Roles: USER / ADMIN / SUPPORT</i>"]
+        end
+
+        subgraph Database
+            PG["PostgreSQL :5432<br/><i>Users · Sessions · Realm Config</i>"]
+        end
+    end
+
+    SPA <-->|":3000"| NGINX
+    NGINX -->|"/api/* proxy"| SPRING
+    SPA -->|"Login / Register<br/>OAuth2 + PKCE :8080"| KC
+    SPRING -->|"JWK public key fetch"| KC
+    KC -->|"JDBC"| PG
+
+    style SPA fill:#3b82f6,color:#fff,stroke:#2563eb
+    style NGINX fill:#10b981,color:#fff,stroke:#059669
+    style SPRING fill:#f59e0b,color:#fff,stroke:#d97706
+    style KC fill:#6366f1,color:#fff,stroke:#4f46e5
+    style PG fill:#64748b,color:#fff,stroke:#475569
 ```
 
 ### Component Details
@@ -288,218 +289,164 @@ keycloak-poc/
 
 ### 1. Login Flow
 
-```
- User                    React SPA              Keycloak                 Backend
-  |                         |                       |                       |
-  |  1. Click "Login"       |                       |                       |
-  |------------------------>|                       |                       |
-  |                         |                       |                       |
-  |                         | 2. Generate PKCE      |                       |
-  |                         |    code_verifier +    |                       |
-  |                         |    code_challenge     |                       |
-  |                         |                       |                       |
-  |  3. Redirect to Keycloak login page             |                       |
-  |<------------------+    /realms/poc-realm/protocol/openid-connect/auth   |
-  |                   |    ?client_id=poc-frontend  |                       |
-  |                   |    &response_type=code      |                       |
-  |                   |    &code_challenge=...      |                       |
-  |                   |    &code_challenge_method=S256                      |
-  |                         |                       |                       |
-  |  4. User enters credentials on Keycloak login page (login.ftl)         |
-  |--------------------------------------->|        |                       |
-  |                         |              |        |                       |
-  |                         |   5. Validate credentials against DB          |
-  |                         |              |------->|                       |
-  |                         |              |<-------|                       |
-  |                         |              |        |                       |
-  |  6. Redirect back with authorization code       |                       |
-  |<-----------------------------+         |        |                       |
-  |  http://localhost:3000?code=abc123     |        |                       |
-  |                         |              |        |                       |
-  |                         | 7. Exchange code + code_verifier for tokens   |
-  |                         |-------------------->|                         |
-  |                         |                     |                         |
-  |                         | 8. Receive tokens   |                         |
-  |                         |<--------------------|                         |
-  |                         |  {                  |                         |
-  |                         |    access_token,    |                         |
-  |                         |    refresh_token,   |                         |
-  |                         |    id_token         |                         |
-  |                         |  }                  |                         |
-  |                         |                     |                         |
-  |  9. User is now authenticated — UI updates with username, roles        |
-  |<------------------------|                     |                         |
+```mermaid
+sequenceDiagram
+    actor User
+    participant SPA as React SPA
+    participant KC as Keycloak
+    participant DB as PostgreSQL
+
+    User->>SPA: 1. Click "Login"
+    SPA->>SPA: 2. Generate PKCE code_verifier + code_challenge
+    SPA->>User: 3. Redirect to Keycloak login page
+    Note right of SPA: /realms/poc-realm/protocol/<br/>openid-connect/auth<br/>?client_id=poc-frontend<br/>&response_type=code<br/>&code_challenge=...<br/>&code_challenge_method=S256
+    User->>KC: 4. Enter credentials (login.ftl)
+    KC->>DB: 5. Validate credentials
+    DB-->>KC: OK
+    KC->>User: 6. Redirect back with authorization code
+    Note left of KC: http://localhost:3000<br/>?code=abc123
+    SPA->>KC: 7. Exchange code + code_verifier for tokens
+    KC-->>SPA: 8. Return tokens
+    Note right of KC: access_token<br/>refresh_token<br/>id_token
+    SPA->>User: 9. UI updates with username & roles
 ```
 
 ### 2. Registration Flow
 
-```
- User                    React SPA              Keycloak
-  |                         |                       |
-  |  1. Click "Register"    |                       |
-  |------------------------>|                       |
-  |                         |                       |
-  |  2. Redirect to Keycloak registration page      |
-  |<------------------------|                       |
-  |  /realms/poc-realm/protocol/openid-connect/registrations
-  |                         |                       |
-  |  3. User fills registration form (register.ftl) |
-  |     - First Name, Last Name                     |
-  |     - Email, Username                           |
-  |     - Password, Confirm Password                |
-  |--------------------------------------->|        |
-  |                         |              |        |
-  |                         |  4. Keycloak creates user with "USER" role
-  |                         |              |        |  (default role)
-  |                         |              |        |
-  |                         |  5. If verifyEmail=true:
-  |  <--- Email verification page shown ---|        |
-  |                         |              |        |
-  |  6. After verification, redirect back with auth code
-  |  (same PKCE flow as login)             |        |
-  |                         |              |        |
-  |  7. User is logged in with USER role   |        |
-  |<------------------------|              |        |
+```mermaid
+sequenceDiagram
+    actor User
+    participant SPA as React SPA
+    participant KC as Keycloak
+
+    User->>SPA: 1. Click "Register"
+    SPA->>User: 2. Redirect to Keycloak registration page
+    Note right of SPA: /realms/poc-realm/protocol/<br/>openid-connect/registrations
+    User->>KC: 3. Fill registration form (register.ftl)
+    Note right of User: First Name, Last Name<br/>Email, Username<br/>Password, Confirm Password
+    KC->>KC: 4. Create user with default "USER" role
+    alt verifyEmail = true
+        KC->>User: 5. Show email verification page
+        User->>KC: Verify email
+    end
+    KC->>SPA: 6. Redirect back with auth code (PKCE flow)
+    SPA->>User: 7. User logged in with USER role
 ```
 
 ### 3. API Request Flow (JWT Validation)
 
-```
- React SPA                    Backend (Spring Boot)              Keycloak
-    |                              |                                |
-    | 1. API Request               |                                |
-    |  GET /api/user/profile       |                                |
-    |  Authorization: Bearer <JWT> |                                |
-    |---------------------------->|                                 |
-    |                             |                                 |
-    |                             | 2. Extract JWT from header      |
-    |                             |                                 |
-    |                             | 3. Fetch public key (cached)    |
-    |                             |------------------------------->|
-    |                             |   GET /realms/poc-realm/        |
-    |                             |   protocol/openid-connect/certs |
-    |                             |<-------------------------------|
-    |                             |   { keys: [{ kty, n, e, ... }]}|
-    |                             |                                 |
-    |                             | 4. Validate JWT:                |
-    |                             |    - Verify signature (RSA)    |
-    |                             |    - Check issuer matches      |
-    |                             |    - Check not expired         |
-    |                             |                                 |
-    |                             | 5. Extract roles:              |
-    |                             |    realm_access.roles           |
-    |                             |    → ["USER","ADMIN"]          |
-    |                             |    → ROLE_USER, ROLE_ADMIN     |
-    |                             |                                 |
-    |                             | 6. Check authorization:        |
-    |                             |    /api/user/* requires USER   |
-    |                             |    User has ROLE_USER? YES     |
-    |                             |                                 |
-    | 7. Return response          |                                 |
-    |<----------------------------|                                 |
-    |  200 OK                     |                                 |
-    |  { username, email, roles } |                                 |
+```mermaid
+sequenceDiagram
+    participant SPA as React SPA
+    participant API as Spring Boot Backend
+    participant KC as Keycloak
+
+    SPA->>API: 1. GET /api/user/profile<br/>Authorization: Bearer <JWT>
+    API->>API: 2. Extract JWT from Authorization header
+    API->>KC: 3. Fetch JWK public key (cached)
+    Note right of API: GET /realms/poc-realm/<br/>protocol/openid-connect/certs
+    KC-->>API: Public key set { keys: [{kty, n, e, ...}] }
+    API->>API: 4. Validate JWT
+    Note right of API: Verify RSA signature<br/>Check issuer matches<br/>Check not expired
+    API->>API: 5. Extract roles via KeycloakRoleConverter
+    Note right of API: realm_access.roles<br/>["USER","ADMIN"]<br/>→ ROLE_USER, ROLE_ADMIN
+    API->>API: 6. Check authorization<br/>/api/user/* requires ROLE_USER ✓
+    API-->>SPA: 7. 200 OK { username, email, roles }
 ```
 
 ### 4. Token Refresh Flow
 
-```
- React SPA                                Keycloak
-    |                                         |
-    |  (Access token expires every 5 min)     |
-    |                                         |
-    |  1. Auto-refresh runs every 30 seconds  |
-    |     keycloak.updateToken(60)            |
-    |     "Refresh if token expires in <60s"  |
-    |                                         |
-    |  2. If refresh needed:                  |
-    |     POST /realms/poc-realm/protocol/    |
-    |     openid-connect/token               |
-    |     grant_type=refresh_token            |
-    |     refresh_token=<refresh_token>       |
-    |---------------------------------------->|
-    |                                         |
-    |  3. Keycloak validates refresh token    |
-    |     - Not expired (30 min idle,         |
-    |       10 hour max)                      |
-    |     - Session still active              |
-    |                                         |
-    |  4. New tokens issued                   |
-    |<----------------------------------------|
-    |  {                                      |
-    |    access_token: <new>,                 |
-    |    refresh_token: <new>,                |
-    |    expires_in: 300                      |
-    |  }                                      |
-    |                                         |
-    |  5. If refresh fails → auto-logout      |
-    |                                         |
+```mermaid
+sequenceDiagram
+    participant SPA as React SPA
+    participant KC as Keycloak
+
+    Note over SPA: Access token expires every 5 min<br/>Auto-refresh runs every 30s
+
+    SPA->>SPA: 1. keycloak.updateToken(60)<br/>"Refresh if expires in <60s"
+    alt Token needs refresh
+        SPA->>KC: 2. POST /realms/poc-realm/protocol/openid-connect/token<br/>grant_type=refresh_token
+        KC->>KC: 3. Validate refresh token
+        Note right of KC: Not expired (30 min idle, 10 hr max)<br/>Session still active
+        KC-->>SPA: 4. New tokens issued
+        Note left of KC: access_token: new<br/>refresh_token: new<br/>expires_in: 300
+    else Refresh fails
+        SPA->>SPA: 5. Auto-logout user
+    end
 ```
 
 ### 5. Logout Flow
 
-```
- User                 React SPA                     Keycloak
-  |                      |                              |
-  | 1. Click "Logout"    |                              |
-  |--------------------->|                              |
-  |                      |                              |
-  |                      | 2. keycloak.logout()          |
-  |                      |   redirectUri: origin         |
-  |                      |----------------------------->|
-  |                      |                              |
-  |                      |   3. Keycloak invalidates:   |
-  |                      |      - Access token          |
-  |                      |      - Refresh token         |
-  |                      |      - Server-side session   |
-  |                      |                              |
-  | 4. Redirect to home  |                              |
-  |<----------------------------------------------------|
-  |  http://localhost:3000                              |
-  |                      |                              |
-  | 5. User sees unauthenticated state                  |
-  |   (Login/Register buttons)                          |
+```mermaid
+sequenceDiagram
+    actor User
+    participant SPA as React SPA
+    participant KC as Keycloak
+
+    User->>SPA: 1. Click "Logout"
+    SPA->>KC: 2. keycloak.logout({ redirectUri: origin })
+    KC->>KC: 3. Invalidate tokens & session
+    Note right of KC: Revoke access token<br/>Revoke refresh token<br/>Destroy server-side session
+    KC->>User: 4. Redirect to http://localhost:3000
+    Note over User: 5. User sees unauthenticated state<br/>(Login / Register buttons)
 ```
 
 ### 6. Role-Based Access Flow
 
+#### Backend Authorization (Security Boundary)
+
+```mermaid
+flowchart TD
+    JWT["JWT Token from Keycloak<br/><i>realm_access.roles: ['USER', 'ADMIN']</i>"]
+    CONV["KeycloakRoleConverter<br/><i>Spring Security</i>"]
+    JWT --> CONV
+    CONV -->|"USER → ROLE_USER<br/>ADMIN → ROLE_ADMIN"| CHECK
+
+    CHECK{Route Matcher}
+    CHECK --> USER_EP["/api/user/*<br/>Requires: ROLE_USER"]
+    CHECK --> ADMIN_EP["/api/admin/*<br/>Requires: ROLE_ADMIN"]
+    CHECK --> SUPPORT_EP["/api/support/*<br/>Requires: ROLE_SUPPORT<br/>or ROLE_ADMIN"]
+
+    USER_EP --> U_YES["200 OK"]
+    USER_EP --> U_NO["403 Forbidden"]
+    ADMIN_EP --> A_YES["200 OK"]
+    ADMIN_EP --> A_NO["403 Forbidden"]
+    SUPPORT_EP --> S_YES["200 OK"]
+    SUPPORT_EP --> S_NO["403 Forbidden"]
+
+    style JWT fill:#6366f1,color:#fff
+    style CONV fill:#f59e0b,color:#fff
+    style U_YES fill:#22c55e,color:#fff
+    style A_YES fill:#22c55e,color:#fff
+    style S_YES fill:#22c55e,color:#fff
+    style U_NO fill:#ef4444,color:#fff
+    style A_NO fill:#ef4444,color:#fff
+    style S_NO fill:#ef4444,color:#fff
 ```
-                     JWT Token (issued by Keycloak)
-                    +-------------------------------+
-                    | realm_access: {               |
-                    |   roles: ["USER", "ADMIN"]    |
-                    | }                             |
-                    +---------------+---------------+
-                                    |
-                    +---------------v---------------+
-                    |   KeycloakRoleConverter        |
-                    |   (Spring Security)            |
-                    |                               |
-                    |   "USER"  → ROLE_USER         |
-                    |   "ADMIN" → ROLE_ADMIN        |
-                    +---------------+---------------+
-                                    |
-            +-----------------------+-----------------------+
-            |                       |                       |
-   +--------v--------+   +---------v--------+   +----------v---------+
-   | /api/user/*      |   | /api/admin/*     |   | /api/support/*     |
-   | Requires:        |   | Requires:        |   | Requires:          |
-   |   ROLE_USER      |   |   ROLE_ADMIN     |   |   ROLE_SUPPORT     |
-   |                  |   |                  |   |   or ROLE_ADMIN    |
-   | Has ROLE_USER?   |   | Has ROLE_ADMIN?  |   | Has either role?   |
-   |   YES → 200 OK   |   |   YES → 200 OK   |   |   YES → 200 OK    |
-   |   NO  → 403      |   |   NO  → 403      |   |   NO  → 403       |
-   +------------------+   +------------------+   +--------------------+
 
-    Frontend mirrors this with PrivateRoute (UX only, not a security boundary):
+#### Frontend Route Guards (UX Only — Not a Security Boundary)
 
-   +------------------+   +------------------+   +--------------------+
-   | /dashboard       |   | /admin           |   | /support           |
-   | roles={["USER"]} |   | roles={["ADMIN"]}|   | roles={["SUPPORT", |
-   |                  |   |                  |   |         "ADMIN"]}  |
-   | Show page or     |   | Show page or     |   | Show page or       |
-   | redirect to /    |   | show 403         |   | show 403           |
-   +------------------+   +------------------+   +--------------------+
+```mermaid
+flowchart LR
+    subgraph PrivateRoute
+        D["/dashboard<br/>roles: USER"]
+        A["/admin<br/>roles: ADMIN"]
+        S["/support<br/>roles: SUPPORT, ADMIN"]
+    end
+
+    D -->|"Has role"| D_OK["Show Page"]
+    D -->|"No role"| D_FAIL["Redirect to /"]
+    A -->|"Has role"| A_OK["Show Page"]
+    A -->|"No role"| A_FAIL["Show 403"]
+    S -->|"Has role"| S_OK["Show Page"]
+    S -->|"No role"| S_FAIL["Show 403"]
+
+    style D_OK fill:#22c55e,color:#fff
+    style A_OK fill:#22c55e,color:#fff
+    style S_OK fill:#22c55e,color:#fff
+    style D_FAIL fill:#ef4444,color:#fff
+    style A_FAIL fill:#ef4444,color:#fff
+    style S_FAIL fill:#ef4444,color:#fff
 ```
 
 ---
